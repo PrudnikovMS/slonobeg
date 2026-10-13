@@ -60,7 +60,7 @@
     @media(max-width:680px){
       .page { padding:13px 11px 22px; }
       .topline{margin-bottom:12px;}.mark{width:59px;height:66px;padding:5px 8px;border-radius:11px}.mark img{max-height:100%}
-      .brand{gap:10px}.desktop-tag{display:none;}.brand-sub{letter-spacing:.6px;}.top-right{gap:5px}.square-btn{height:39px;min-width:39px}
+      .brand{gap:7px}.desktop-tag{display:none;}.brand-sub{letter-spacing:.6px;}.top-right{gap:5px}.square-btn{height:39px;min-width:39px}
       .game{padding:5px;border-radius:20px}.stage{height:clamp(410px,62svh,560px);border-radius:16px;}
       .hud{top:11px;left:10px;right:10px;gap:5px}.stat{min-width:77px;padding:7px 9px;border-radius:11px}.stat small{font-size:9px;letter-spacing:.6px}.stat strong{font-size:20px}.stage-tag{font-size:9px;padding:9px 8px}
       .shade{padding:94px 14px 18px}.panel{padding:19px 14px 20px;border-radius:23px}.panel h1{font-size:clamp(29px,9vw,41px)}.panel p{font-size:13px}.pill{font-size:10px}
@@ -79,7 +79,7 @@
       </div>
       <div><div class="brand-name">СЛОНОБЕГ</div><div class="brand-sub">Игра от бренда «Со Слоном»</div></div>
     </div>
-    <div class="top-right"><span class="desktop-tag">МИНИ-ИГРА</span><button id="pause" class="square-btn" title="Пауза / продолжить (P)" aria-label="Пауза" hidden>Ⅱ</button><button id="sound" class="square-btn" title="Звук включён (нажмите, чтобы выключить)" aria-label="Выключить звук" aria-pressed="true">🔊</button></div>
+    <div class="top-right"><span class="desktop-tag">МИНИ-ИГРА</span><button id="pause" class="square-btn" title="Пауза / продолжить (P)" aria-label="Пауза" hidden>Ⅱ</button><button id="testsound" class="square-btn" title="Проверить звук" aria-label="Проверить звук">▶♪</button><button id="sound" class="square-btn" title="Звук включён (нажмите, чтобы выключить)" aria-label="Выключить звук" aria-pressed="true">🔊</button></div>
   </header>
   <main>
     <section class="game" aria-label="Игра Слонобег">
@@ -98,13 +98,14 @@
             <h1>СЛОНО<span>БЕГ</span></h1>
             <p>Помоги слонёнку пройти саванну!<br>Перепрыгивай камни и брёвна,<br>собирай заряд и ставь рекорды.</p>
             <button class="main-btn" id="primary">НАЧАТЬ ИГРУ →</button>
-            <div class="control-hint">Пробел / ↑ / касание — прыжок. Звук включён 🔊</div>
+            <div class="control-hint">Пробел / ↑ / касание — прыжок. Звук: кнопка ▶♪ вверху</div>
           </div>
         </div>
       </div>
     </section>
     <div class="below"><div class="instructions"><span class="key">↑</span><span class="key">␣</span><span>Прыгай через препятствия<br>и собирай светящиеся заряды!</span></div><button id="jump" class="jump-btn">↑ ПРЫЖОК</button></div>
   </main>
+  <div id="sound-status" role="status" style="min-height:21px;padding:12px 3px 0;color:#ffdf8e;font-size:12px;font-weight:650;">Если нет звука, нажми ▶♪ вверху для проверки.</div>
   <footer class="footer"><span>«Со Слоном» — энергия с доброй силой.<br>Мини-игра для хорошего настроения.</span><a href="https://сослоном.рф/" target="_blank" rel="noopener noreferrer">Узнать о бренде ↗</a></footer>
 </div>
 <script>
@@ -122,6 +123,8 @@
   const jumpBtn = document.getElementById('jump');
   const pauseBtn = document.getElementById('pause');
   const soundBtn = document.getElementById('sound');
+  const testSoundBtn = document.getElementById('testsound');
+  const soundStatus = document.getElementById('sound-status');
   const PI = Math.PI, TAU = PI * 2;
   let W=900,H=470,ground=370,scale=1;
   let state='ready', time=0, world=0, elapsed=0, score=0, picked=0, speed=305, spawnIn=1.15, last=0;
@@ -155,46 +158,87 @@
   else window.addEventListener('resize',resize);
   resize();
 
+
+  // Compatibility fallback: generate WAV sounds entirely in-browser.
+  const wavCache=new Map();
+  function makeWav(freq,duration){
+    const rate=16000,frames=Math.round(rate*duration),bytes=new Uint8Array(44+frames*2);
+    const view=new DataView(bytes.buffer);
+    function label(off,str){for(let i=0;i<str.length;i++)bytes[off+i]=str.charCodeAt(i);}
+    label(0,'RIFF');view.setUint32(4,bytes.length-8,true);label(8,'WAVE');label(12,'fmt ');
+    view.setUint32(16,16,true);view.setUint16(20,1,true);view.setUint16(22,1,true);
+    view.setUint32(24,rate,true);view.setUint32(28,rate*2,true);view.setUint16(32,2,true);
+    view.setUint16(34,16,true);label(36,'data');view.setUint32(40,frames*2,true);
+    for(let i=0;i<frames;i++){
+      const t=i/rate,x=i/frames;
+      const env=Math.min(1,x/.045)*Math.pow(1-x,2.2);
+      const a=Math.sin(2*Math.PI*freq*t)+.24*Math.sin(2*Math.PI*freq*2*t);
+      view.setInt16(44+i*2,Math.max(-32767,Math.min(32767,Math.round(a*env*23000))),true);
+    }
+    let binary='';for(let p=0;p<bytes.length;p+=4096)binary+=String.fromCharCode(...bytes.subarray(p,p+4096));
+    return 'data:audio/wav;base64,'+btoa(binary);
+  }
+  function wavFallback(freq,duration){
+    try {
+      const key=Math.round(freq)+'-'+Math.round(duration*100);
+      let url=wavCache.get(key);
+      if(!url){url=makeWav(freq,duration);wavCache.set(key,url);}
+      const a=new Audio(url);
+      a.volume=.95;
+      const result=a.play();
+      if(result && result.catch)result.catch(()=>{soundStatus.textContent='Звук заблокирован браузером. Проверь разрешение звука и беззвучный режим iPhone.';});
+    } catch(e){soundStatus.textContent='Аудио недоступно в этом браузере.';}
+  }
   function unlockAudio(){
     if(muted) return;
     try {
       if(!audio){
         const AC=window.AudioContext||window.webkitAudioContext;
-        if(!AC) return;
+        if(!AC)return;
         audio=new AC();
       }
-      if(audio.state==='suspended') {
+      if(audio.state!=='running'){
         const res=audio.resume();
-        if(res && res.catch) res.catch(()=>{});
+        if(res && res.catch)res.catch(()=>{});
       }
     } catch(e) {}
   }
-  // Capturing pointer/touch/keyboard gestures also handles mobile embedded browsers.
   document.addEventListener('pointerdown',unlockAudio,{capture:true,passive:true});
   document.addEventListener('touchstart',unlockAudio,{capture:true,passive:true});
   document.addEventListener('keydown',unlockAudio,{capture:true,passive:true});
-  function sound(f,d=.11,type='sine',vol=.12){
+  function sound(f,d=.13,type='sine',vol=.2){
     if(muted)return;
     unlockAudio();
-    if(!audio)return;
+    if(!audio||audio.state!=='running'){
+      wavFallback(f,Math.max(.14,d));return;
+    }
     try {
       const now=audio.currentTime;
       const o=audio.createOscillator(),g=audio.createGain();
       o.type=type;
       o.frequency.setValueAtTime(f,now);
-      o.frequency.exponentialRampToValueAtTime(Math.max(60,f*.67),now+d);
+      o.frequency.exponentialRampToValueAtTime(Math.max(65,f*.68),now+d);
       g.gain.setValueAtTime(.0001,now);
-      g.gain.exponentialRampToValueAtTime(Math.max(.001,vol),now+.012);
+      g.gain.exponentialRampToValueAtTime(Math.min(.38,vol*2.2),now+.018);
       g.gain.exponentialRampToValueAtTime(.0001,now+d);
       o.connect(g);g.connect(audio.destination);
-      o.start(now);o.stop(now+d+.02);
-    } catch(e) {}
+      o.start(now);o.stop(now+d+.03);
+    } catch(e){wavFallback(f,Math.max(.14,d));}
   }
+  testSoundBtn.addEventListener('click',()=>{
+    muted=false;
+    syncSoundButton();
+    try{localStorage.setItem('soslonom_sound_muted','false');}catch(e){}
+    unlockAudio();
+    sound(880,.28,'triangle',.25);
+    soundStatus.textContent='Тестовый сигнал запущен. Не слышно? Увеличь громкость мультимедиа и отключи бесшумный режим.';
+  });
   soundBtn.addEventListener('click',()=>{
     muted=!muted;
     try { localStorage.setItem('soslonom_sound_muted',String(muted)); } catch(e) {}
     syncSoundButton();
-    if(!muted){unlockAudio();sound(780,.14,'triangle',.14);}
+    soundStatus.textContent=muted?'Звук выключен.':'Звук включён. Нажми ▶♪ для проверки.';
+    if(!muted){unlockAudio();sound(780,.15,'triangle',.22);}
   });
 
   function start(){
